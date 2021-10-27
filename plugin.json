@@ -1,7 +1,7 @@
 {
-    "name": "<TODO: your plugin name>",
-    "url": "<TODO: Your Plugin URL here>",
-    "description": "<TODO: Your Plugin description here>",
+    "name": "Mailchimp Campaigns Plugin",
+    "url": "https://github.com/samwinslow/mailchimp-campaigns-plugin",
+    "description": "Ingest data from Mailchimp Campaigns into PostHog",
     "main": "index.js",
     "posthogVersion": ">= 1.25.0",
     "config": [
@@ -9,11 +9,18 @@
             "markdown": "<TODO: your plugin config, remove if none>"
         },
         {
-            "key": "greeting",
-            "name": "What greeting would you like to use?",
+            "key": "data_center",
+            "name": "Data center for your account. For example, us6 corresponds to a base URL of https://us6.api.mailchimp.com/3.0/",
             "type": "string",
-            "default": "Hello World!",
-            "required": false
+            "default": null,
+            "required": true
+        },
+        {
+            "key": "api_key",
+            "name": "Mailchimp API key for your account, for example: 0123456789abcdef0123456789abcde-us6",
+            "type": "string",
+            "default": null,
+            "required": true
         }
     ]
 }

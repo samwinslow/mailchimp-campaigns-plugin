@@ -1,25 +1,8 @@
-# PostHog Plugin Starter Kit
+# Mailchimp Campaigns Plugin (WIP)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-This is a PostHog plugin template.
-
-The existing sample code adds property `"greeting"` to every event with a configurable value (default: `"Hello world!"`).  
-But that is just to help you get started! To make it your own:
-- [ ] Add your code to `index.js`.
-- [ ] Add your metadata and configuration schema to `plugin.json`.
-- [ ] Search for `<TODO:`, make sure none are left!
-- [ ] Optional: Add a `logo.png` file to give this plugin its own logo.
-
-If you're looking for inspiration, here are a few exemplary plugins:
-
-1. [Hello World](https://github.com/PostHog/helloworldplugin) – basic event processing, with tests
-1. [S3 Export](https://github.com/PostHog/s3-export-plugin) – event export using the AWS SDK, with TypeScript
-1. [GeoIP](https://github.com/PostHog/posthog-plugin-geoip) – advanced event processing using the GeoIP feature, with tests, formatting, linting, TypeScript, and GitHub Actions CI
-1. [PagerDuty](https://github.com/PostHog/posthog-pagerduty-plugin) – periodic job using external HTTP API access
-
-To get up to speed with the environment of plugins, check out [our Plugins overview in PostHog Docs](https://posthog.com/docs/plugins/build/overview).  
-For a crash course, read [the Plugins tutorial in PostHog Docs](https://posthog.com/docs/plugins/build/tutorial).
+This plugin allows you to ingest data from Mailchimp Campaigns into PostHog.
 
 ## Installation
 
@@ -27,6 +10,28 @@ For a crash course, read [the Plugins tutorial in PostHog Docs](https://posthog.
 1. Go to the Plugins page from the sidebar.
 1. Head to the Advanced tab.
 1. "Install from GitHub, GitLab or npm" using this repository's URL.
+
+
+## Tracked events
+
+1 event will be captured per user, per event. The event names as they will appear in PostHog are:
+
+- `Mailchimp email delivered`
+- `Mailchimp email opened`
+- `Mailchimp email link clicked`
+- `Mailchimp email bounced`
+
+Event properties are:
+
+| Event property | Description | Example value | Applicable events |
+| -------------- | ----------- | ------------- | ----------------- |
+| `email` | Recipient's email address | `hey@posthog.com` | all |
+| `timestamp` | ISO 8601 timestamp of the email activity event | `2020-11-11T11:45:00+00:00` | all |
+| `mc_list_id` | List id associated with the email activity event | `01234abcdef` | all |
+| `mc_email_id` | MD5-hashed value of the recipient's email address | `0123456789abcdef0123456789abcdef` | all |
+| `mc_bounce_type` | Bounce event type: `hard \| soft` | `hard` | email bounced |
+| `mc_click_url` | Destination URL for click events | `https://posthog.com/docs/` | email link clicked |
+| `$ip` | IP address where the email activity event occurred | `2020-11-11T11:45:00+00:00` | email opened, email link clicked |
 
 ## Questions?
 
