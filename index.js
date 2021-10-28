@@ -11,6 +11,7 @@ export async function setupPlugin({ storage, config, global }) {
 
     // Store Mailchimp config globally
     global.mailchimp = { baseUrl, authorization, resultsPerPage }
+    global.batchTimeout = 1800 // Timeout (seconds). Consider a batch lost if processing time is beyond this.
 }
 
 async function loadAllCampaigns({ mailchimp: { baseUrl, authorization, resultsPerPage }}) {
@@ -102,7 +103,13 @@ async function batchRequestActivityReports({ mailchimp: { baseUrl, authorization
     return batchId
 }
 
+async function timeout(sec) {
+    return new Promise(resolve => setTimeout(resolve(), sec * 1000))
+}
+
 export async function runEveryHour({ storage, global }) {
+    const { mailchimp: { baseUrl, authorization }} = global
+
     // Load all campaign metadata
     const campaigns = await loadAllCampaigns(global)
 
@@ -110,6 +117,37 @@ export async function runEveryHour({ storage, global }) {
     const batchId = await batchRequestActivityReports(global, campaigns)
     if (!batchId) {
         throw new Error('Failed to create batch request.')
+    }
+
+    // Check batch status periodically; exponential backoff
+    let apiErrorState = false
+    let backoffPeriods = 0 // n, as in 2^n seconds delay
+
+    const url = baseUrl + `/batches/${batchId}`
+    while (!apiErrorState && Math.pow(2, backoffPeriods) < global.batchTimeout) {
+        try {
+            console.log(`awaiting for ${backoffPeriods}`)
+            console.log('global state', JSON.stringify(global), setTimeout)
+            const [response] = await Promise.all([
+                fetch(url, {
+                    headers: {
+                        Accept: 'application/json',
+                        Authorization: authorization,
+                    }
+                }),
+                timeout(Math.pow(2, backoffPeriods))
+            ])
+            console.log(`awaiting complete`, { response })
+            const { status, response_body_url, errored_operations } = await response.json()
+            console.log({ url, status, response_body_url, errored_operations })
+            if (status === 'finished') {
+                break
+            }
+            backoffPeriods++
+        } catch (err) {
+            apiErrorState = true
+            throw new Error(`API request failed: ${err.toString()}`)
+        }
     }
 
     // TODO: Set lastCapturedTime in storage and add `since` param to batch operation.
