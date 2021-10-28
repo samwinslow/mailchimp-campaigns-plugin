@@ -32,13 +32,16 @@ Event properties are:
 
 | Event property | Description | Example value | Applicable events |
 | -------------- | ----------- | ------------- | ----------------- |
-| `email` | Recipient's email address | `hey@posthog.com` | all |
 | `timestamp` | ISO 8601 timestamp of the email activity event | `2020-11-11T11:45:00+00:00` | all |
-| `mc_list_id` | List id associated with the email activity event | `01234abcdef` | all |
+| `email` | Recipient's email address | `hey@posthog.com` | all |
 | `mc_email_id` | MD5-hashed value of the recipient's email address | `0123456789abcdef0123456789abcdef` | all |
+| `mc_list_id` | List id associated with the email activity event | `01234abcdef` | all |
+| `mc_campaign_id` | Unique identifier for this campaign | `01234abcdef` | all |
+| `mc_campaign_title` | Title of this campaign in Mailchimp | `Sales Campaign (Fall 2021)` | all |
+| `mc_subject_line` | Subject line of the campaign email | `Hello human, how are you?` | all |
 | `mc_bounce_type` | Bounce event type: `hard \| soft` | `hard` | email bounced |
 | `mc_click_url` | Destination URL for click events | `https://posthog.com/docs/` | email link clicked |
-| `$ip` | IP address where the email activity event occurred | `2020-11-11T11:45:00+00:00` | email opened, email link clicked |
+| `$ip` | Client IP address where the email activity event occurred | `123.456.78.90` | email opened, email link clicked |
 
 ## Questions?
 

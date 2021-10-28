@@ -1,4 +1,4 @@
-export async function setupPlugin({ storage, config }) {
+export async function setupPlugin({ storage, config, global }) {
     if (!config.data_center || !config.api_key) {
         throw new Error("Please set the 'data_center' or 'api_key' config values")
     }
@@ -6,14 +6,28 @@ export async function setupPlugin({ storage, config }) {
     const baseUrl = `https://${data_center}.api.mailchimp.com/3.0/`
     const authString = 'user:' + config.api_key
     const authorization = Buffer.from(authString, 'utf8').toString('base64')
+    const resultsPerPage = 1000 // Request length for paginated endpoints
 
-    // Load all campaigns via paginated endpoint
+    // Store Mailchimp config globally
+    global.mailchimp = { baseUrl, authorization, resultsPerPage }
+}
+
+async function loadAllCampaigns({ mailchimp: { baseUrl, authorization, resultsPerPage }}) {
+    // Loads and returns all campaigns.
+
     const allCampaigns = []
-    let allCampaignsLoaded = false
+    const fields = [
+        'total_items',
+        'campaigns.id',
+        'campaigns.emails_sent',
+        'campaigns.settings.subject_line',
+        'campaigns.settings.title',
+    ].join(',')
     let offset = 0
+    let allCampaignsLoaded = false
 
     while (!allCampaignsLoaded) {
-        const url = baseUrl + `/campaigns?count=1000&offset=${offset}&status=sent&fields=campaigns.id,total_items`
+        const url = baseUrl + `/campaigns?count=${resultsPerPage}&offset=${offset}&status=sent&fields=${fields}`
         const response = await fetch(url, {
             headers: {
                 Accept: 'application/json',
@@ -28,31 +42,69 @@ export async function setupPlugin({ storage, config }) {
             offset = allCampaigns.length
         }
     }
-    // TODO: Load campaigns into storage or cache.
-    // TODO: Set lastCapturedTime in storage and add `since` param to batch operation.
+
+    return allCampaigns
 }
 
-// run every ten minutes
-//
-// PSEUDOCODE:
-    // Batch email activity requests via POST /batches with body:
-    // {
-    //     "operations": [
-    //         {
-    //             "method": "GET",
-    //             "path": "reports/${campaign_id}/email-activity",
-    //             "operation_id": "get_report_${campaign_id}",
-    //             "params": {
-    //                 "count": 1000,
-    //                 "offset": 0,
-    //                 "fields": "emails.list_id,emails.email_id,emails.email_address,emails.activity,campaign_id,total_items"
-    //             }
-    //         }
-    //     ]
-    // }
-    //
-    // Once the batch id is known, call batch status via GET /batches/${batch_id} and exponentially back-off until status === 'finished'
-    //
-    // Un-gzip the response data and parse JSON
-    //
-    // Identify reports where total recipients exceeds 1000 (another paginated endpoint) and create more batch requests as necessary until every report is loaded
+async function batchRequestActivityReports({ mailchimp: { baseUrl, authorization, resultsPerPage }}, campaigns) {
+    // Given a list of campaigns, create a batch request for email activity report details.
+    // Returns batchId (string): id of the batch request if successfully submitted
+
+    const fields = [
+        'campaign_id',
+        'total_items',
+        'emails.list_id',
+        'emails.email_id',
+        'emails.email_address',
+        'emails.activity',
+    ].join(',')
+
+    const makeBatchOperation = (campaignId, offset, since = null) => ({
+        method: 'GET',
+        path: `reports/${campaignId}/email-activity`,
+        operation_id: `get_report_${campaignId}`,
+        params: {
+            count: resultsPerPage,
+            offset,
+            fields,
+            since,
+        }
+    })
+
+    // Create batch operations for each campaign, in chunks of length (resultsPerPage). May be unnecessary to chunk.
+    const batchOperations = []
+    campaigns.forEach(({ id: campaignId, emails_sent }) => {
+        const numOperations = Math.ceil(emails_sent / resultsPerPage)
+        for (let i = 0; i < numOperations; i++) {
+            batchOperations.push(makeBatchOperation(campaignId, i * resultsPerPage))
+        }
+    })
+
+    // Submit the batch request
+    const url = baseUrl + '/batches'
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: authorization,
+        },
+        body: JSON.stringify({ operations: batchOperations }),
+    })
+    const { id: batchId } = await response.json()
+
+    return batchId
+}
+
+export async function runEveryHour({ storage, global }) {
+    // Load all campaign metadata
+    const campaigns = await loadAllCampaigns(global)
+
+    // Batch requests for email activity reports
+    const batchId = await batchRequestActivityReports(global, campaigns)
+    if (!batchId) {
+        throw new Error('Failed to create batch request.')
+    }
+
+    // TODO: Set lastCapturedTime in storage and add `since` param to batch operation.
+}
