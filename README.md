@@ -12,6 +12,13 @@ This plugin allows you to ingest data from Mailchimp Campaigns into PostHog.
 1. "Install from GitHub, GitLab or npm" using this repository's URL.
 
 
+## Configuration
+
+You must provide your Mailchimp API key and data center shortcode to authenticate with the Mailchimp API.
+
+For more details see [plugin.json](./plugin.json).
+
+
 ## Tracked events
 
 1 event will be captured per user, per event. The event names as they will appear in PostHog are:
