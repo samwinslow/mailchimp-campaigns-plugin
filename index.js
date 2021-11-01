@@ -1,3 +1,5 @@
+import zlib from 'zlib'
+
 export async function setupPlugin({ storage, config, global }) {
     const { data_center, api_key } = config
     if (!data_center || !api_key) {
@@ -12,6 +14,10 @@ export async function setupPlugin({ storage, config, global }) {
     // Store Mailchimp config globally
     global.mailchimp = { baseUrl, authorization, resultsPerPage }
     global.batchTimeout = 1800 // Timeout (seconds). Consider a batch lost if processing time is beyond this.
+}
+
+export async function teardownPlugin({ cache }) {
+    cache.expire('batchId', 0)
 }
 
 async function loadAllCampaigns({ mailchimp: { baseUrl, authorization, resultsPerPage }}) {
@@ -56,7 +62,7 @@ async function loadAllCampaigns({ mailchimp: { baseUrl, authorization, resultsPe
     return allCampaigns
 }
 
-async function batchRequestActivityReports({ mailchimp: { baseUrl, authorization, resultsPerPage }}, campaigns) {
+async function batchRequestActivityReports({ mailchimp: { baseUrl, authorization }}, campaigns, since) {
     // Given a list of campaigns, create a batch request for email activity report details.
     // Returns batchId (string): id of the batch request if successfully submitted
 
@@ -80,7 +86,7 @@ async function batchRequestActivityReports({ mailchimp: { baseUrl, authorization
         operation_id: `get_report_${campaignId}`,
         params: {
             fields,
-            since: null, // TODO
+            since,
         }
     }))
 
@@ -103,51 +109,77 @@ async function batchRequestActivityReports({ mailchimp: { baseUrl, authorization
     return batchId
 }
 
-async function timeout(sec) {
-    return new Promise(resolve => setTimeout(resolve(), sec * 1000))
+async function getBatchResult({ mailchimp: { baseUrl, authorization }}, batchId) {
+    const url = baseUrl + `/batches/${batchId}`
+    const response = await fetch(url, {
+        headers: {
+            Accept: 'application/json',
+            Authorization: authorization,
+        }
+    })
+    const result = await response.json()
+    return result
 }
 
-export async function runEveryHour({ storage, global }) {
+async function extractBatchResult(archiveUrl) {
+    // Fetch Gzip archive located on Mailchimp S3
+    const response = await fetch(archiveUrl, {
+        headers: {
+            Accept: '*/*',
+            'Accept-Encoding': 'gzip',
+        }
+    })
+
+    const buffer = await response.text()
+    // save buffer to memfs
+    zlib.unzip(buffer, (err, result) => {
+        if (err) {
+            throw new Error(`Failed to decompress gzip: ${err}`)
+        }
+        return result
+    })
+}
+
+export async function runEveryMinute({ cache, global }) { // run every minute, but don't create new batch requests every minute
     const { mailchimp: { baseUrl, authorization }} = global
 
-    // Load all campaign metadata
-    const campaigns = await loadAllCampaigns(global)
-
-    // Batch requests for email activity reports
-    const batchId = await batchRequestActivityReports(global, campaigns)
-    if (!batchId) {
-        throw new Error('Failed to create batch request.')
-    }
-
-    // Check batch status periodically; exponential backoff
-    let apiErrorState = false
-    let backoffPeriods = 0 // n, as in 2^n seconds delay
-
-    const url = baseUrl + `/batches/${batchId}`
-    while (!apiErrorState && Math.pow(2, backoffPeriods) < global.batchTimeout) {
+    const existingBatchId = await cache.get('batchId')
+    if (existingBatchId) {
+        // If batch in progress, try to fetch its status
+        // status: enum "pending", "preprocessing", "started", "finalizing", "finished"
         try {
-            console.log(`awaiting for ${backoffPeriods}`)
-            console.log('global state', JSON.stringify(global), setTimeout)
-            const [response] = await Promise.all([
-                fetch(url, {
-                    headers: {
-                        Accept: 'application/json',
-                        Authorization: authorization,
-                    }
-                }),
-                timeout(Math.pow(2, backoffPeriods))
-            ])
-            console.log(`awaiting complete`, { response })
-            const { status, response_body_url, errored_operations } = await response.json()
-            console.log({ url, status, response_body_url, errored_operations })
-            if (status === 'finished') {
-                break
+            const { status, response_body_url, errored_operations } = await getBatchResult(global, existingBatchId)
+            if (errored_operations && errored_operations > 0) {
+                throw new Error('Error in remote server while processing batch operations.')
             }
-            backoffPeriods++
+            if (status !== 'finished') {
+                return
+            }
+
+            // Get gzipped result
+            const batchResult = await extractBatchResult(response_body_url)
+
+            // Remove batchId from cache as the batch is complete
+            cache.expire('batchId', 0)
+
         } catch (err) {
-            apiErrorState = true
+            if (err.status === 429) {
+                console.error('Received 429 Too Many Requests. Retrying...')
+                return
+            }
             throw new Error(`API request failed: ${err.toString()}`)
         }
+    } else {
+        // Load all campaign metadata
+        const campaigns = await loadAllCampaigns(global)
+
+        // Create batch request for email activity reports
+        const batchId = await batchRequestActivityReports(global, campaigns, null) // TODO add since
+        if (!batchId) {
+            throw new Error('Failed to create batch request.')
+        }
+
+        cache.set('batchId', batchId, global.batchTimeout)
     }
 
     // TODO: Set lastCapturedTime in storage and add `since` param to batch operation.
