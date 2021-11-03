@@ -28,7 +28,7 @@ export const setupPlugin: MailchimpPlugin['setupPlugin'] = async ({ config, glob
     if (!config.api_key) {
         throw new Error("Please set the api_key config value")
     }
-    const [, data_center] = config.api_key.match(/(-)([a-z0-9]+)$/) || []
+    const [, data_center] = config.api_key.match(/-([a-z]+\d+)$/) || []
     if (!data_center) {
         throw new Error("Invalid api_key. Please include the data center suffix in your key, e.g. `-us6`")
     }
@@ -36,31 +36,30 @@ export const setupPlugin: MailchimpPlugin['setupPlugin'] = async ({ config, glob
     const baseUrl = `https://${data_center}.api.mailchimp.com/3.0/`
     const authString = 'user:' + config.api_key
 
-    global = {
-        mailchimp: { // Store Mailchimp credentials for use where needed
-            baseUrl,
-            headers: {
-                Accept: 'application/json',
-                Authorization: 'Basic ' + Buffer.from(authString, 'utf8').toString('base64'),
-            },
-            resultsPerPage: 1000, // Request length for paginated endpoints
+    // Store Mailchimp credentials for use where needed
+    global.mailchimp = {
+        baseUrl,
+        headers: {
+            Accept: 'application/json',
+            Authorization: 'Basic ' + Buffer.from(authString, 'utf8').toString('base64'),
         },
-        campaigns: {
-            items: [],
-            state: null,
-            total_items: null,
-        },
-        reports: {
-            items: [],
-            state: null,
-            total_items: null,
-        }
+        resultsPerPage: 1000, // Request length for paginated endpoints
     }
+    global.campaigns = {
+        items: [],
+        state: null,
+        total_items: null,
+    }
+    global.reports = {
+        items: [],
+        state: null,
+        total_items: null,
+    }
+
 }
 
 export const jobs: MailchimpPlugin['jobs'] = {
     fetchCampaigns: async ({ global, jobs }) => {
-        console.log('determining if we should run...')
         if (['error', 'loaded'].includes(global.campaigns.state)) {
             return
         }
@@ -98,8 +97,9 @@ export const jobs: MailchimpPlugin['jobs'] = {
 }
 
 export const runEveryMinute: MailchimpPlugin['runEveryMinute'] = async ({ global, jobs }) => {
+    console.log({ global })
     if (global.campaigns.state === null) {
-        await jobs.fetchCampaigns({})
+        await jobs.fetchCampaigns(undefined).runNow()
     }
 }
 
