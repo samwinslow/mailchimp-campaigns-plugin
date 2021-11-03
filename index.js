@@ -60,64 +60,25 @@ async function loadAllCampaigns({ mailchimp: { baseUrl, authorization, resultsPe
     return allCampaigns
 }
 
-async function batchRequestActivityReports({ mailchimp: { baseUrl, authorization }}, campaigns, since) {
-    // Given a list of campaigns, create a batch request for email activity report details.
-    // Returns batchId (string): id of the batch request if successfully submitted
+// const fields = [
+//     'campaign_id',
+//     'total_items',
+//     'emails.list_id',
+//     'emails.email_id',
+//     'emails.email_address',
+//     'emails.activity',
+// ].join(',')
 
-    if (!campaigns) {
-        throw new Error('Campaigns must be provided (did an API call fail upstream?)')
-    }
-
-    const fields = [
-        'campaign_id',
-        'total_items',
-        'emails.list_id',
-        'emails.email_id',
-        'emails.email_address',
-        'emails.activity',
-    ].join(',')
-
-    // Create batch operations for each campaign. Batched results will not be paginated.
-    const batchOperations = campaigns.map(({ id: campaignId }) => ({
-        method: 'GET',
-        path: `reports/${campaignId}/email-activity`,
-        operation_id: `get_report_${campaignId}`,
-        params: {
-            fields,
-            since,
-        }
-    }))
-
-    // Submit the batch request
-    const url = baseUrl + '/batches'
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            Authorization: authorization,
-        },
-        body: JSON.stringify({ operations: batchOperations }),
-    })
-    const { id: batchId, status } = await response.json()
-    if (status >= 400) {
-        throw new Error(`API request failed with status ${status}`)
-    }
-
-    return batchId
-}
-
-async function getBatchResult({ mailchimp: { baseUrl, authorization }}, batchId) {
-    const url = baseUrl + `/batches/${batchId}`
-    const response = await fetch(url, {
-        headers: {
-            Accept: 'application/json',
-            Authorization: authorization,
-        }
-    })
-    const result = await response.json()
-    return result
-}
+// // Create batch operations for each campaign. Batched results will not be paginated.
+// const batchOperations = campaigns.map(({ id: campaignId }) => ({
+//     method: 'GET',
+//     path: `reports/${campaignId}/email-activity`,
+//     operation_id: `get_report_${campaignId}`,
+//     params: {
+//         fields,
+//         since,
+//     }
+// }))
 
 
 export async function runEveryMinute({ cache, global }) { // run every minute, but don't create new batch requests every minute
@@ -125,27 +86,7 @@ export async function runEveryMinute({ cache, global }) { // run every minute, b
 
     const existingBatchId = await cache.get('batchId')
     if (existingBatchId) {
-        // If batch in progress, try to fetch its status
-        // status: enum "pending", "preprocessing", "started", "finalizing", "finished"
-        try {
-            const { status, response_body_url, errored_operations } = await getBatchResult(global, existingBatchId)
-            if (errored_operations && errored_operations > 0) {
-                throw new Error('Error in remote server while processing batch operations.')
-            }
-            if (status !== 'finished') {
-                return
-            }
 
-            // Remove batchId from cache as the batch is complete
-            cache.expire('batchId', 0)
-
-        } catch (err) {
-            if (err.status === 429) {
-                console.error('Received 429 Too Many Requests. Retrying...')
-                return
-            }
-            throw new Error(`API request failed: ${err.toString()}`)
-        }
     } else {
         // Load all campaign metadata
         const campaigns = await loadAllCampaigns(global)
