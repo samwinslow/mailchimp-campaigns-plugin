@@ -6,14 +6,7 @@
     "posthogVersion": ">= 1.25.0",
     "config": [
         {
-            "markdown": "**Data center**: Data center shortcode for your account. For example, `us6` corresponds to a base URL of https://us6.api.mailchimp.com/3.0/.\n\n**API key**: Mailchimp API key for your account, for example: `0123456789abcdef0123456789abcde-us6`."
-        },
-        {
-            "key": "data_center",
-            "name": "Data center",
-            "type": "string",
-            "default": null,
-            "required": true
+            "markdown": "**API key**: Mailchimp API key for your account, including the data center suffix, for example: `0123456789abcdef0123456789abcde-us6`."
         },
         {
             "key": "api_key",

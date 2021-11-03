@@ -1,27 +1,3 @@
-export interface MailchimpPluginMeta {
-    config: {
-        data_center: string,
-        api_key: string,
-    },
-    global: {
-        mailchimp: {
-            baseUrl: string,
-            headers: Record<string, string>,
-            resultsPerPage: number,
-        },
-        campaigns: {
-            items: Campaign[],
-            state: ResourceLoadingState,
-            total_items: number | null,
-        },
-        reports: {
-            items: Report[],
-            state: ResourceLoadingState,
-            total_items: number | null,
-        },
-    },
-}
-
 export type Campaign = {
     id: string,
     emails_sent: number,
