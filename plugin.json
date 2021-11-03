@@ -2,7 +2,7 @@
     "name": "Mailchimp Campaigns Plugin",
     "url": "https://github.com/samwinslow/mailchimp-campaigns-plugin",
     "description": "Ingest data from Mailchimp Campaigns into PostHog",
-    "main": "index.js",
+    "main": "index.ts",
     "posthogVersion": ">= 1.25.0",
     "config": [
         {
