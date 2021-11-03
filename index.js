@@ -1,5 +1,3 @@
-import zlib from 'zlib'
-
 export async function setupPlugin({ storage, config, global }) {
     const { data_center, api_key } = config
     if (!data_center || !api_key) {
@@ -121,24 +119,6 @@ async function getBatchResult({ mailchimp: { baseUrl, authorization }}, batchId)
     return result
 }
 
-async function extractBatchResult(archiveUrl) {
-    // Fetch Gzip archive located on Mailchimp S3
-    const response = await fetch(archiveUrl, {
-        headers: {
-            Accept: '*/*',
-            'Accept-Encoding': 'gzip',
-        }
-    })
-
-    const buffer = await response.text()
-    // save buffer to memfs
-    zlib.unzip(buffer, (err, result) => {
-        if (err) {
-            throw new Error(`Failed to decompress gzip: ${err}`)
-        }
-        return result
-    })
-}
 
 export async function runEveryMinute({ cache, global }) { // run every minute, but don't create new batch requests every minute
     const { mailchimp: { baseUrl, authorization }} = global
@@ -155,9 +135,6 @@ export async function runEveryMinute({ cache, global }) { // run every minute, b
             if (status !== 'finished') {
                 return
             }
-
-            // Get gzipped result
-            const batchResult = await extractBatchResult(response_body_url)
 
             // Remove batchId from cache as the batch is complete
             cache.expire('batchId', 0)
