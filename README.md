@@ -24,6 +24,8 @@ For more details see [plugin.json](./plugin.json).
 1 event will be captured per user, per event. The event names as they will appear in PostHog are:
 
 - `Mailchimp email delivered`
+  - Sent for every email, including bounced deliveries.
+  - If the result was a bounce, the property `mc_delivery_successful` will be false.
 - `Mailchimp email opened`
 - `Mailchimp email link clicked`
 - `Mailchimp email bounced`
@@ -40,6 +42,7 @@ Event properties are:
 | `mc_campaign_id` | Unique identifier for this campaign | `01234abcdef` | all |
 | `mc_campaign_title` | Title of this campaign in Mailchimp | `Sales Campaign (Fall 2021)` | all |
 | `mc_subject_line` | Subject line of the campaign email | `Hello human, how are you?` | all |
+| `mc_delivery_successful` | Whether or not the campaign email was delivered successfully | true | `true` on all, but `false` on bounce events and on email delivered events where the result was a bounce |
 | `mc_bounce_type` | Bounce event type: `hard \| soft` | `hard` | email bounced |
 | `mc_click_url` | Destination URL for click events | `https://posthog.com/docs/` | email link clicked |
 | `$ip` | Client IP address where the email activity event occurred | `123.456.78.90` | email opened, email link clicked |

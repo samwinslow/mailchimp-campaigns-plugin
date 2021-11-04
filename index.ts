@@ -1,7 +1,7 @@
 import { Plugin } from '@posthog/plugin-scaffold'
-import { Campaign, Report, ReportAccumulator, ResourceLoadingState } from './types'
+import { Campaign, EmailActionEntry, EmailActivityEvent, Report, ReportAccumulator, ResourceLoadingState } from './types'
 
-type MailchimpPlugin = Plugin<{
+type MailchimpPluginInput = {
     config: {
         api_key: string,
     },
@@ -21,7 +21,35 @@ type MailchimpPlugin = Plugin<{
             state: ResourceLoadingState,
         },
     },
-}>
+}
+
+enum MailchimpEventName {
+    DELIVERED = 'Mailchimp email delivered',
+    OPENED = 'Mailchimp email opened',
+    CLICKED = 'Mailchimp email link clicked',
+    BOUNCED = 'Mailchimp email bounced',
+}
+
+type PostHogMailchimpEvent = {
+    event: MailchimpEventName
+    timestamp: string
+    properties: {
+        distinct_id: string
+        $email: string
+        mc_recipient_email: string
+        mc_email_id: string
+        mc_list_id: string
+        mc_campaign_id: string
+        mc_campaign_title: string
+        mc_subject_line: string
+        mc_delivery_successful?: boolean
+        mc_bounce_type?: string
+        mc_click_url?: string
+        $ip?: string
+    }
+}
+
+type MailchimpPlugin = Plugin<MailchimpPluginInput>
 
 export const setupPlugin: MailchimpPlugin['setupPlugin'] = async ({ config, global }) => {
     if (!config.api_key) {
@@ -66,6 +94,7 @@ export const jobs: MailchimpPlugin['jobs'] = {
             'total_items',
             'campaigns.id',
             'campaigns.emails_sent',
+            'campaigns.send_time',
             'campaigns.settings.subject_line',
             'campaigns.settings.title',
         ].join(',')
@@ -147,6 +176,67 @@ export const jobs: MailchimpPlugin['jobs'] = {
     },
 }
 
+const getEventNameForAction = (action: EmailActionEntry['action']): MailchimpEventName => {
+    switch (action) {
+        case 'open':
+            return MailchimpEventName.OPENED
+        case 'click':
+            return MailchimpEventName.CLICKED
+        case 'bounce':
+            return MailchimpEventName.BOUNCED
+    }
+}
+
+const getEventsFromReports = (
+    reports: MailchimpPluginInput['global']['reports'],
+    campaigns: MailchimpPluginInput['global']['campaigns']
+): PostHogMailchimpEvent[] => {
+    let posthogEvents: PostHogMailchimpEvent[] = []
+    Object.entries(reports.items).forEach(([campaignId, report]) => {
+        const { title, subject_line, send_time } = campaigns.items.find(({ id }) => id === campaignId) ?? {}
+        report.emails.forEach((event: EmailActivityEvent) => {
+            const commonProps: PostHogMailchimpEvent['properties'] = {
+                distinct_id: event.email_address,
+                $email: event.email_address,
+                mc_recipient_email: event.email_address,
+                mc_email_id: event.email_id,
+                mc_list_id: event.list_id,
+                mc_campaign_id: campaignId,
+                mc_campaign_title: title,
+                mc_subject_line: subject_line,
+            }
+            let mc_delivery_successful = true
+            event.activity.forEach(entry => {
+                if (entry.action === 'bounce') {
+                    mc_delivery_successful = false
+                }
+                // Push event for each action performed
+                posthogEvents.push({
+                    event: getEventNameForAction(entry.action),
+                    timestamp: entry.timestamp,
+                    properties: {
+                        ...commonProps,
+                        mc_bounce_type: 'type' in entry ? entry.type : undefined,
+                        mc_click_url: 'url' in entry ? entry.url : undefined,
+                        $ip: 'ip' in entry ? entry.ip : undefined,
+                        mc_delivery_successful,
+                    }
+                })
+            })
+            // Push event for the implied action of delivering the email
+            posthogEvents.push({
+                event: MailchimpEventName.DELIVERED,
+                timestamp: send_time,
+                properties: {
+                    ...commonProps,
+                    mc_delivery_successful,
+                }
+            })
+        })
+    })
+    return posthogEvents
+}
+
 export const runEveryMinute: MailchimpPlugin['runEveryMinute'] = async ({ global, jobs }) => {
     const { campaigns, reports } = global
     if (campaigns.state === null) {
@@ -158,6 +248,9 @@ export const runEveryMinute: MailchimpPlugin['runEveryMinute'] = async ({ global
         await jobs.fetchReports({ campaignId: first, campaignQueue }).runNow()
     }
     if (campaigns.state === 'loaded' && reports.state === 'loaded') {
-        console.log('Steady state. Waiting...')
+        console.log('Steady state. Posting batch of events to PostHog...')
+        const events = getEventsFromReports(reports, campaigns)
+        console.log({ events: events?.slice(0, 100) }) // TEMP
+        // TODO post batch to PostHog in reasonable chunks
     }
 }
