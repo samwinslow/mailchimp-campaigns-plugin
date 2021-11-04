@@ -28,6 +28,8 @@ export type Report = {
 
 export type ResourceLoadingState = null | 'loading' | 'loaded' | 'error'
 
+export type BatchSendingState = null | 'sending' | 'error'
+
 export type ReportAccumulator = {
     campaignId: string
     campaignQueue: string[]

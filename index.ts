@@ -1,5 +1,8 @@
 import { Plugin } from '@posthog/plugin-scaffold'
-import { Campaign, EmailActionEntry, EmailActivityEvent, Report, ReportAccumulator, ResourceLoadingState } from './types'
+import { BatchSendingState, Campaign, EmailActionEntry, EmailActivityEvent, Report, ReportAccumulator, ResourceLoadingState } from './types'
+
+// Until a typedef is written for posthog, suppress the warnings
+declare const posthog: any
 
 type MailchimpPluginInput = {
     config: {
@@ -20,6 +23,9 @@ type MailchimpPluginInput = {
             items: Record<Campaign['id'], Report>,
             state: ResourceLoadingState,
         },
+        posthog: {
+            batchState: BatchSendingState,
+        }
     },
 }
 
@@ -81,6 +87,9 @@ export const setupPlugin: MailchimpPlugin['setupPlugin'] = async ({ config, glob
         items: {},
         state: null,
     }
+    global.posthog = {
+        batchState: null,
+    }
 }
 
 export const jobs: MailchimpPlugin['jobs'] = {
@@ -88,7 +97,7 @@ export const jobs: MailchimpPlugin['jobs'] = {
         if (['error', 'loaded'].includes(global.campaigns.state)) {
             return
         }
-        console.log('fetching campaigns...')
+        global.campaigns.state = 'loading'
         const { headers, baseUrl, resultsPerPage } = global.mailchimp
         const fields = [
             'total_items',
@@ -108,12 +117,10 @@ export const jobs: MailchimpPlugin['jobs'] = {
                 console.error('Campaigns was expected in the response.')
                 await jobs.fetchCampaigns().runIn(1, 'seconds')
             }
-            console.log({ total_items })
             global.campaigns.items.push(...campaigns)
             global.campaigns.total_items = total_items
             if (global.campaigns.items.length >= total_items) {
                 global.campaigns.state = 'loaded'
-                console.log('Finished fetching campaigns.')
             } else {
                 await jobs.fetchCampaigns().runIn(1, 'seconds') // Recurse to fetch all
             }
@@ -126,7 +133,7 @@ export const jobs: MailchimpPlugin['jobs'] = {
         if (['error', 'loaded'].includes(global.reports.state)) {
             return
         }
-        console.log(`fetching report for campaign ${campaignId}...`)
+        global.reports.state = 'loading'
         if (!global.reports.items[campaignId]) [
             global.reports.items[campaignId] = {
                 emails: [],
@@ -152,18 +159,15 @@ export const jobs: MailchimpPlugin['jobs'] = {
                 console.error('Emails was expected in the response.')
                 await jobs.fetchReports({ campaignId, campaignQueue }).runIn(1, 'seconds')
             }
-            console.log({ emails, total_items })
             global.reports.items[campaignId].emails.push(...emails)
             global.reports.items[campaignId].total_items = total_items
             if (global.reports.items[campaignId].emails.length >= total_items) {
-                console.log(`Finished fetching report for campaign ${campaignId}.`)
                 const next = campaignQueue.shift()
                 if (next) {
                     // Move to the next campaign in the queue
                     await jobs.fetchReports({ campaignId: next, campaignQueue }).runIn(1, 'seconds')
                 } else {
                     global.reports.state = 'loaded'
-                    console.log('Finished fetching reports.')
                 }
             } else {
                 // Recurse to fetch all items for this campaign
@@ -174,6 +178,24 @@ export const jobs: MailchimpPlugin['jobs'] = {
             throw new Error(`API request failed: ${err.toString()}`)
         }
     },
+    captureBatchEvents: async (events: PostHogMailchimpEvent[], { global, jobs }) => {
+        if (global.posthog.batchState === 'error') {
+            return
+        }
+        global.posthog.batchState = 'sending'
+        // Send only 40,000 events to stay well below 20 MB max payload size
+        const chunkedEvents = events.splice(40000) // splice mutates array
+        posthog.post('/capture', {
+            data: {
+                batch: chunkedEvents
+            }
+        })
+        if (events.length) {
+            await jobs.captureBatchEvents(events).runIn(1, 'seconds')
+        } else {
+            global.posthog.batchState = null
+        }
+    }
 }
 
 const getEventNameForAction = (action: EmailActionEntry['action']): MailchimpEventName => {
@@ -242,15 +264,15 @@ export const runEveryMinute: MailchimpPlugin['runEveryMinute'] = async ({ global
     if (campaigns.state === null) {
         await jobs.fetchCampaigns(undefined).runNow()
     }
-    if (campaigns.state === 'loaded' && reports.state === null) {
-        let campaignQueue = campaigns.items.map(({ id }) => id)
-        const first = campaignQueue.shift()
-        await jobs.fetchReports({ campaignId: first, campaignQueue }).runNow()
-    }
-    if (campaigns.state === 'loaded' && reports.state === 'loaded') {
-        console.log('Steady state. Posting batch of events to PostHog...')
-        const events = getEventsFromReports(reports, campaigns)
-        console.log({ events: events?.slice(0, 100) }) // TEMP
-        // TODO post batch to PostHog in reasonable chunks
+    if (campaigns.state === 'loaded') {
+        if (reports.state === null) {
+            let campaignQueue = campaigns.items.map(({ id }) => id)
+            const first = campaignQueue.shift()
+            await jobs.fetchReports({ campaignId: first, campaignQueue }).runNow()
+        }
+        if (reports.state === 'loaded' && global.posthog.batchState === null) {
+            const events = getEventsFromReports(reports, campaigns)
+            await jobs.captureBatchEvents(events).runNow()
+        }
     }
 }
