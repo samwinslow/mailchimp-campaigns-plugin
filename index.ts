@@ -1,5 +1,5 @@
 import { Plugin } from '@posthog/plugin-scaffold'
-import { Campaign, Report, ResourceLoadingState } from './types'
+import { Campaign, Report, ReportAccumulator, ResourceLoadingState } from './types'
 
 type MailchimpPlugin = Plugin<{
     config: {
@@ -17,9 +17,8 @@ type MailchimpPlugin = Plugin<{
             total_items: number | null,
         },
         reports: {
-            items: Report[],
+            items: Record<Campaign['id'], Report>,
             state: ResourceLoadingState,
-            total_items: number | null,
         },
     },
 }>
@@ -51,11 +50,9 @@ export const setupPlugin: MailchimpPlugin['setupPlugin'] = async ({ config, glob
         total_items: null,
     }
     global.reports = {
-        items: [],
+        items: {},
         state: null,
-        total_items: null,
     }
-
 }
 
 export const jobs: MailchimpPlugin['jobs'] = {
@@ -78,7 +75,9 @@ export const jobs: MailchimpPlugin['jobs'] = {
             const response = await fetch(url, { headers })
             const { campaigns, total_items } = await response.json()
             if (!campaigns) {
-                throw new Error('Campaigns was expected in the response.')
+                // Retry request
+                console.error('Campaigns was expected in the response.')
+                await jobs.fetchCampaigns().runIn(1, 'seconds')
             }
             console.log({ total_items })
             global.campaigns.items.push(...campaigns)
@@ -94,31 +93,71 @@ export const jobs: MailchimpPlugin['jobs'] = {
             throw new Error(`API request failed: ${err.toString()}`)
         }
     },
+    fetchReports: async ({ campaignId, campaignQueue }: ReportAccumulator, { global, jobs }) => {
+        if (['error', 'loaded'].includes(global.reports.state)) {
+            return
+        }
+        console.log(`fetching report for campaign ${campaignId}...`)
+        if (!global.reports.items[campaignId]) [
+            global.reports.items[campaignId] = {
+                emails: [],
+                total_items: null,
+            }
+        ]
+        const { headers, baseUrl, resultsPerPage } = global.mailchimp
+        const fields = [
+            'campaign_id',
+            'total_items',
+            'emails.list_id',
+            'emails.email_id',
+            'emails.email_address',
+            'emails.activity',
+        ].join(',')
+        const offset = global.reports.items[campaignId].emails.length
+        const url = baseUrl + `/reports/${campaignId}/email-activity?count=${resultsPerPage}&offset=${offset}&fields=${fields}`
+        try {
+            const response = await fetch(url, { headers })
+            const { emails, total_items } = await response.json()
+            if (!emails) {
+                // Retry request
+                console.error('Emails was expected in the response.')
+                await jobs.fetchReports({ campaignId, campaignQueue }).runIn(1, 'seconds')
+            }
+            console.log({ emails, total_items })
+            global.reports.items[campaignId].emails.push(...emails)
+            global.reports.items[campaignId].total_items = total_items
+            if (global.reports.items[campaignId].emails.length >= total_items) {
+                console.log(`Finished fetching report for campaign ${campaignId}.`)
+                const next = campaignQueue.shift()
+                if (next) {
+                    // Move to the next campaign in the queue
+                    await jobs.fetchReports({ campaignId: next, campaignQueue }).runIn(1, 'seconds')
+                } else {
+                    global.reports.state = 'loaded'
+                    console.log('Finished fetching reports.')
+                }
+            } else {
+                // Recurse to fetch all items for this campaign
+                await jobs.fetchReports({ campaignId, campaignQueue }).runIn(1, 'seconds')
+            }
+        } catch (err) {
+            global.reports.state = 'error'
+            throw new Error(`API request failed: ${err.toString()}`)
+        }
+    },
 }
 
 export const runEveryMinute: MailchimpPlugin['runEveryMinute'] = async ({ global, jobs }) => {
-    console.log({ global })
-    if (global.campaigns.state === null) {
+    const { campaigns, reports } = global
+    if (campaigns.state === null) {
         await jobs.fetchCampaigns(undefined).runNow()
     }
+    if (campaigns.state === 'loaded' && reports.state === null) {
+        let campaignQueue = campaigns.items.map(({ id }) => id)
+        const first = campaignQueue.shift()
+        await jobs.fetchReports({ campaignId: first, campaignQueue }).runNow()
+    }
+    if (campaigns.state === 'loaded' && reports.state === 'loaded') {
+        console.log('Steady state. Waiting...')
+    }
 }
-
-// For campaign report query
-
-// const fields = [
-//     'campaign_id',
-//     'total_items',
-//     'emails.list_id',
-//     'emails.email_id',
-//     'emails.email_address',
-//     'emails.activity',
-// ].join(',')
-
-// {
-//     method: 'GET',
-//     path: `reports/${campaignId}/email-activity`,
-//     params: {
-//         fields,
-//         since,
-//     }
-// }

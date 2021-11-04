@@ -15,9 +15,13 @@ export type EmailActivityEvent = {
 }
 
 export type Report = {
-    campaign_id: string,
-    total_items: number,
+    total_items: number | null,
     emails: EmailActivityEvent[],
 }
 
 export type ResourceLoadingState = null | 'loading' | 'loaded' | 'error'
+
+export type ReportAccumulator = {
+    campaignId: string,
+    campaignQueue: string[],
+}
