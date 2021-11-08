@@ -6,14 +6,28 @@
     "posthogVersion": ">= 1.25.0",
     "config": [
         {
-            "markdown": "**API key**: Mailchimp API key for your account, including the data center suffix, for example: `0123456789abcdef0123456789abcde-us6`."
+            "markdown": "**Mailchimp API key**: Mailchimp API key for your account, including the data center suffix, for example: `0123456789abcdef0123456789abcde-us6`.\n\n**PostHog Project API key**: API key for the PostHog project where you want to send events. Accessible in-app under \"Project Settings\".\n\n**PostHog Host Address**: Base URL for your PostHog instance, if self-hosted. Default value will be `https://app.posthog.com/` (Cloud)."
         },
         {
-            "key": "api_key",
-            "name": "API key",
+            "key": "mc_api_key",
+            "name": "Mailchimp API key",
             "type": "string",
             "default": null,
             "required": true
+        },
+        {
+            "key": "ph_api_key",
+            "name": "PostHog Project API key",
+            "type": "string",
+            "default": null,
+            "required": true
+        },
+        {
+            "key": "ph_host",
+            "name": "PostHog Host Address",
+            "type": "string",
+            "default": "https://app.posthog.com/",
+            "required": false
         }
     ]
 }
