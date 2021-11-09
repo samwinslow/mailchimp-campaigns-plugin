@@ -190,19 +190,22 @@ export const jobs: MailchimpPlugin['jobs'] = {
         if (global.posthog.batchState === 'error') {
             return
         }
-        console.log(`Sending batch of ${events.length} events to PostHog.`)
         global.posthog.batchState = 'sending'
 
         // Send only 20K events to stay well below 20 MB max payload size
-        const chunkedEvents = events.splice(20000)
-        const result = await posthog.api.post('/capture/', {
-            data: {
-                api_key: config.ph_api_key,
-                batch: chunkedEvents,
-            },
-            host: config.ph_host || DEFAULT_POSTHOG_HOST,
-        })
-        console.log('PostHog batch API responded with:', { result })
+        const chunkedEvents = events.slice(0, 20000)
+        if (chunkedEvents.length) {
+            console.log(`Sending batch of ${chunkedEvents.length} events to PostHog.`)
+            const result = await posthog.api.post('/capture/', {
+                data: {
+                    api_key: config.ph_api_key,
+                    batch: chunkedEvents,
+                },
+                host: config.ph_host || DEFAULT_POSTHOG_HOST,
+            })
+            console.log('PostHog batch API responded with:', { result })
+        }
+        events = events.slice(20000)
         if (events.length) {
             await jobs.captureBatchEvents(events).runIn(1, 'seconds')
         } else {
@@ -285,7 +288,11 @@ export const runEveryMinute: MailchimpPlugin['runEveryMinute'] = async ({ global
         }
         if (reports.state === 'loaded' && global.posthog.batchState === null) {
             const events = getEventsFromReports(reports, campaigns)
-            jobs.captureBatchEvents(events).runNow()
+            if (events.length) {
+                jobs.captureBatchEvents(events).runNow()
+            } else {
+                console.log('Did not find any Mailchimp events in the specified timerange.')
+            }
         }
     }
 }
